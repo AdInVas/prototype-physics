@@ -52,7 +52,6 @@ public class GameRendererMixin {
         Vec3 headPos = new Vec3(head.position.x, head.position.y, head.position.z);
         if (lastpos == null) lastpos = headPos;
         lastpos = lastpos.lerp(headPos, 0.2f);
-
         // --- Smooth rotation ---
         Quaternionf q = new Quaternionf(head.rotation.x, head.rotation.y, head.rotation.z, head.rotation.w);
         oldQ.slerp(q, 0.2f);
@@ -62,7 +61,7 @@ public class GameRendererMixin {
         var camType = mc.options.getCameraType();
 
         // --- Default target = head position ---
-        Vector3f target = new Vector3f((float) lastpos.x, (float) lastpos.y, (float) lastpos.z);
+        Vector3f target = new Vector3f((float) lastpos.x, (float) lastpos.y-2.6f, (float) lastpos.z);
 
         // --- Apply third-person offset if needed ---
         if (!camType.isFirstPerson()) {
@@ -87,10 +86,10 @@ public class GameRendererMixin {
         Vec3 smooth = current.lerp(newPos, 0.3f);
 
         // --- Apply movement ---
-        ((CameraAccessor) camera).invokermove(
-                smooth.x - current.x,
-                smooth.y - current.y,
-                smooth.z - current.z
+        ((CameraAccessor) camera).invokerSetPosition(
+                smooth.x ,
+                smooth.y ,
+                smooth.z
         );
 
         // --- Apply rotation ---

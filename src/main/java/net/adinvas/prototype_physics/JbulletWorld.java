@@ -53,7 +53,7 @@ public class JbulletWorld {
 
     public void step(float dt) {
         // fixed-step, with substeps
-        dynamicsWorld.stepSimulation(dt, 10, 1f/60f);
+        dynamicsWorld.stepSimulation(dt, 15, 1f/60f);
 
         // read back player positions & dispatch events
         for (PlayerPhysics pp : players.values()) {

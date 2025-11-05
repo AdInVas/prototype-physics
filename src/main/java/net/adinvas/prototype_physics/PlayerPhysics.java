@@ -155,12 +155,12 @@ public class PlayerPhysics {
             );
 
             // collision detection: we attach custom ContactResultCallback or poll manifolds
-            RigidBody torsoBody = ragdollParts.get(0);
+            RigidBody torsoBody = ragdollParts.get(1);
 
             Transform torsoTransform = new Transform();
             torsoBody.getMotionState().getWorldTransform(torsoTransform);
             Vector3f pos = torsoTransform.origin;
-            player.teleportTo(pos.x, pos.y-1f, pos.z);
+            player.teleportTo(pos.x, pos.y, pos.z);
             checkCollisionsForParts();
             updateLocalWorldCollision();
         }
@@ -239,7 +239,6 @@ public class PlayerPhysics {
         rArmBody.setLinearVelocity(motion);
         world.addRigidBody(rArmBody);
         ragdollParts.add(rArmBody);
-        applyRandomImpulse();
     }
     private void applyRandomImpulse() {
         java.util.Random rand = new java.util.Random();
