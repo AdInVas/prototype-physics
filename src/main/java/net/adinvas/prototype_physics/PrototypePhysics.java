@@ -1,10 +1,8 @@
 package net.adinvas.prototype_physics;
 
-import com.bulletphysics.collision.dispatch.CollisionConfiguration;
-import com.bulletphysics.collision.dispatch.DefaultCollisionConfiguration;
 import com.mojang.logging.LogUtils;
 
-
+import net.adinvas.prototype_physics.network.ModNetwork;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
 
@@ -30,32 +28,12 @@ public class PrototypePhysics {
     public PrototypePhysics() {
         IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
 
-        // Register the commonSetup method for modloading
-        modEventBus.addListener(this::commonSetup);
-
-        // Register ourselves for server and other game events we are interested in
         MinecraftForge.EVENT_BUS.register(this);
-        CollisionConfiguration cc = new DefaultCollisionConfiguration();
+        modEventBus.addListener(this::commonSetup);
     }
+
 
     private void commonSetup(final FMLCommonSetupEvent event) {
-
+        event.enqueueWork(ModNetwork::register);
     }
-
-    // You can use SubscribeEvent and let the Event Bus discover methods to call
-    @SubscribeEvent
-    public void onServerStarting(ServerStartingEvent event) {
-    }
-
-    // You can use EventBusSubscriber to automatically register all static methods in the class annotated with @SubscribeEvent
-    @Mod.EventBusSubscriber(modid = MODID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
-    public static class ClientModEvents {
-
-        @SubscribeEvent
-        public static void onClientSetup(FMLClientSetupEvent event) {
-        }
-    }
-
-
-
 }

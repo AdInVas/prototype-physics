@@ -172,10 +172,13 @@ dependencies {
     // The group id is ignored when searching -- in this case, it is "blank"
     // implementation fg.deobf("blank:coolmod-${mc_version}:${coolmod_version}")
 
-    minecraftLibrary fg.deobf('cz.advel.jbullet:jbullet:20101010-1')
-    minecraftLibrary fg.deobf('javax.vecmath:vecmath:1.5.2')
-    includedLibs 'cz.advel.jbullet:jbullet:20101010-1'
+    minecraftLibrary "cz.advel.jbullet:jbullet:20101010-1"
+    includedLibs "cz.advel.jbullet:jbullet:20101010-1"
+    minecraftLibrary 'javax.vecmath:vecmath:1.5.2'
     includedLibs 'javax.vecmath:vecmath:1.5.2'
+
+
+    //includedLibs 'javax.vecmath:vecmath:1.5.2'
     // For more info:
     // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
     // http://www.gradle.org/docs/current/userguide/dependency_management.html
