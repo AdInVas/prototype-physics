@@ -27,9 +27,9 @@ public class RagdollDebugRenderer {
 
     @SubscribeEvent
     public static void onRenderWorld(RenderLevelStageEvent event) {
+        if (!(mc.getEntityRenderDispatcher().shouldRenderHitBoxes()))return;
         // Render after entities but before particles -> visible, depth-tested
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_ENTITIES) return;
-
         PoseStack poseStack = event.getPoseStack();
         Camera camera = mc.gameRenderer.getMainCamera();
         Vec3 camPos = camera.getPosition();

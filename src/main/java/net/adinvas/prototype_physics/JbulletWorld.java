@@ -4,6 +4,7 @@ import com.bulletphysics.collision.broadphase.AxisSweep3;
 import com.bulletphysics.collision.broadphase.BroadphaseInterface;
 import com.bulletphysics.collision.dispatch.CollisionConfiguration;
 import com.bulletphysics.collision.dispatch.CollisionDispatcher;
+import com.bulletphysics.collision.dispatch.CollisionObject;
 import com.bulletphysics.collision.dispatch.DefaultCollisionConfiguration;
 import com.bulletphysics.dynamics.DiscreteDynamicsWorld;
 import com.bulletphysics.dynamics.constraintsolver.ConstraintSolver;
@@ -61,6 +62,10 @@ public class JbulletWorld {
         }
     }
 
+    public DiscreteDynamicsWorld getDynamicsWorld() {
+        return dynamicsWorld;
+    }
+
     public void addPlayer(ServerPlayer player) {
         PlayerPhysics pp = new PlayerPhysics(player, this, dynamicsWorld);
         players.put(player.getUUID(), pp);
@@ -77,5 +82,14 @@ public class JbulletWorld {
 
     public CollisionDispatcher getDispatcher() { return dispatcher; }
     public DiscreteDynamicsWorld getWorld() { return dynamicsWorld; }
+
+    public ServerPlayer getPlayerFromBody(CollisionObject obj) {
+        for (PlayerPhysics pp : players.values()) {
+            if (pp.hasBody(obj)) {
+                return pp.getPlayer();
+            }
+        }
+        return null;
+    }
 
 }

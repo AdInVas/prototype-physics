@@ -38,7 +38,6 @@ public class GameRendererMixin {
     private void afterCameraSetup(float partialTick, long nanoTime, PoseStack poseStack, CallbackInfo ci){
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
-
         var rag = RagdollManager.get(mc.player.getId());
         if (rag == null || !rag.isActive()) {
             lastpos = null;

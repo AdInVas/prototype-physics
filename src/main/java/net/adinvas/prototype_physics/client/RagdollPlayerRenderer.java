@@ -5,8 +5,8 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.adinvas.prototype_physics.RagdollPart;
 import net.adinvas.prototype_physics.RagdollTransform;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.model.Model;
 import net.minecraft.client.model.PlayerModel;
+import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.model.geom.PartPose;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.renderer.MultiBufferSource;
@@ -14,80 +14,126 @@ import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.entity.player.PlayerRenderer;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RenderPlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import org.joml.Quaternionf;
 import org.joml.Vector3f;
-
-import javax.vecmath.Quat4f;
-import java.util.HashMap;
-import java.util.UUID;
 
 @Mod.EventBusSubscriber(value = Dist.CLIENT,bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class RagdollPlayerRenderer {
     private static final Minecraft mc = Minecraft.getInstance();
 
+
+    static final Vector3f[] headoff = new Vector3f[]{
+            new Vector3f(0.0f, 0.0f, 0.0f),
+            new Vector3f(0.0f, -6.0f/16, 0.0f)
+    };
+    static final Vector3f[] torsoff = new Vector3f[]{
+            new Vector3f(0.0f, 0.0f, 0.0f),
+            new Vector3f(0.0f, -6.0f/16, 0.0f)
+    };
+    static final Vector3f[] larmoff = new Vector3f[]{
+            new Vector3f(3.8F, 4.0f, 0.0f),
+            new Vector3f(1F/16, -7.0f/16, 0.0f)
+    };
+    static final Vector3f[] rarmoff = new Vector3f[]{
+            new Vector3f(-3.8F, 4.0f, 0.0f),
+            new Vector3f(-1F/16, -7.0f/16, 0.0f)
+    };
+    static final Vector3f[] llegoff = new Vector3f[]{
+            new Vector3f(1.9f, 5.5f, 0.0f),
+            new Vector3f(0.0f, 0f/16, 0.0f)
+    };
+    static final Vector3f[] rlegoff = new Vector3f[]{
+            new Vector3f(-1.9f, 5.5f, 0.0f),
+            new Vector3f(0.00f, 0f/16, 0.0f),
+    };
     @SubscribeEvent
     public static void onRenderPlayer(RenderPlayerEvent.Pre event) {
         AbstractClientPlayer player = (AbstractClientPlayer) event.getEntity();
-     RagdollManager.ClientRagdoll rag = RagdollManager.get(player.getId());
-     if (rag == null || !rag.isActive()) return;
-     PlayerRenderer renderer = event.getRenderer();
-     PlayerModel<AbstractClientPlayer> originalModel = renderer.getModel();
-     event.setCanceled(true);
-     RagdollTransform head = rag.getPartInterpolated(RagdollPart.HEAD,event.getPartialTick());
-     Vector3f rot = quaternionToEuler(head.rotation);
-     originalModel.head.setRotation(rot.z,0,0);
-     ResourceLocation texture = player.getSkinTextureLocation();
-     VertexConsumer yes =event.getMultiBufferSource().getBuffer(RenderType.entityTranslucent(texture));
-     originalModel.head.render(event.getPoseStack(),yes, event.getPackedLight(), OverlayTexture.NO_OVERLAY);
+        RagdollManager.ClientRagdoll rag = RagdollManager.get(player.getId());
+        if (rag == null || !rag.isActive()) return;
+
+        event.setCanceled(true); // We’ll manually render the player model
+
+        PlayerRenderer renderer = event.getRenderer();
+        PlayerModel<AbstractClientPlayer> model = renderer.getModel();
+        PoseStack poseStack = event.getPoseStack();
+        MultiBufferSource buffer = event.getMultiBufferSource();
+
+        float partial = event.getPartialTick();
+        RagdollTransform torso = rag.getPartInterpolated(RagdollPart.TORSO, partial);
+        RagdollTransform head = rag.getPartInterpolated(RagdollPart.HEAD, partial);
+        RagdollTransform larm = rag.getPartInterpolated(RagdollPart.LEFT_ARM, partial);
+        RagdollTransform rarm = rag.getPartInterpolated(RagdollPart.RIGHT_ARM, partial);
+        RagdollTransform lleg = rag.getPartInterpolated(RagdollPart.LEFT_LEG, partial);
+        RagdollTransform rleg = rag.getPartInterpolated(RagdollPart.RIGHT_LEG, partial);
+        if (torso == null) return;
+
+        ResourceLocation skin = player.getSkinTextureLocation();
+        VertexConsumer vertexConsumer = buffer.getBuffer(RenderType.entityTranslucent(skin));
+
+        // Render just one part for now (e.g. torso)
+        renderRagdollPart(poseStack, vertexConsumer, player, model.body, torso, torso,torsoff, event.getPackedLight());
+        renderRagdollPart(poseStack, vertexConsumer, player, model.head, head, torso,headoff, event.getPackedLight());
+        renderRagdollPart(poseStack, vertexConsumer, player, model.leftLeg, lleg, torso,llegoff, event.getPackedLight());
+        renderRagdollPart(poseStack, vertexConsumer, player, model.rightLeg, rleg, torso,rlegoff, event.getPackedLight());
+        renderRagdollPart(poseStack, vertexConsumer, player, model.leftArm, larm, torso,larmoff, event.getPackedLight());
+        renderRagdollPart(poseStack, vertexConsumer, player, model.rightArm, rarm, torso,rarmoff, event.getPackedLight());
     }
 
-    public static Vector3f quaternionToEuler(Quat4f q) {
-        // Normalize the quaternion
-        q.normalize();
 
-        // Extract components
-        float x = q.x;
-        float y = q.y;
-        float z = q.z;
-        float w = q.w;
+    public static void renderRagdollPart(
+            PoseStack poseStack,
+            VertexConsumer vertexConsumer,
+            AbstractClientPlayer player,
+            ModelPart part,
+            RagdollTransform transform,
+            RagdollTransform torso,
+            Vector3f[] pivot,
+            int light
+    ) {
+        if (transform == null) return;
+        part.setPos(pivot[0].x,pivot[0].y,pivot[0].z);
+        poseStack.pushPose();
 
-        // Compute Euler angles (in radians)
-        // Pitch (X-axis rotation)
-        float sinr_cosp = 2.0f * (w * x + y * z);
-        float cosr_cosp = 1.0f - 2.0f * (x * x + y * y);
-        float pitch = (float) Math.atan2(sinr_cosp, cosr_cosp);
 
-        // Yaw (Y-axis rotation)
-        float sinp = 2.0f * (w * y - z * x);
-        float yaw;
-        if (Math.abs(sinp) >= 1)
-            yaw = (float) Math.copySign(Math.PI / 2, sinp); // use 90° if out of range
-        else
-            yaw = (float) Math.asin(sinp);
+        // Translate to physics position relative to player
 
-        // Roll (Z-axis rotation)
-        float siny_cosp = 2.0f * (w * z + x * y);
-        float cosy_cosp = 1.0f - 2.0f * (y * y + z * z);
-        float roll = (float) Math.atan2(siny_cosp, cosy_cosp);
+        // --- Step 2: Move to the model part’s vanilla pivot ---
+        Quaternionf torsoRot = new Quaternionf(
+                torso.rotation.x,
+                torso.rotation.y,
+                torso.rotation.z,
+                torso.rotation.w
+        );
 
-        // Return as Vector3f (pitch, yaw, roll)
-        return new Vector3f(pitch, yaw, roll);
+        Vector3f rotatedPivot = new Vector3f(pivot[1]);
+        torsoRot.transform(rotatedPivot);
+
+        // Apply quaternion rotation (world → model space)
+        Quaternionf q = new Quaternionf(
+                transform.rotation.x,
+                transform.rotation.y,
+                transform.rotation.z,
+                transform.rotation.w
+        );
+
+        // Flip Z to match Minecraft’s coordinate system
+        //poseStack.translate(-pivot.x,-pivot.y,-pivot.z);
+        poseStack.translate(-rotatedPivot.x, -rotatedPivot.y, -rotatedPivot.z);
+        q.rotateZ((float) Math.PI);
+        poseStack.mulPose(q);
+
+        //poseStack.translate(pivot.x,pivot.y,pivot.z);
+        // Render part
+        part.render(poseStack, vertexConsumer, light, OverlayTexture.NO_OVERLAY);
+
+        poseStack.popPose();
     }
 
-    private static void resetAllModelParts(PlayerModel<?> model) {
-        // Body parts to reset
-        model.head.loadPose(PartPose.ZERO);
-        model.hat.loadPose(PartPose.ZERO);
-        model.body.loadPose(PartPose.ZERO);
-        model.leftArm.loadPose(PartPose.ZERO);
-        model.rightArm.loadPose(PartPose.ZERO);
-        model.leftLeg.loadPose(PartPose.ZERO);
-        model.rightLeg.loadPose(PartPose.ZERO);
-    }
+
 
 }

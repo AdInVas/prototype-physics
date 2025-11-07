@@ -36,5 +36,9 @@ public class ModNetwork {
                 RagdollEndPacket::encode,
                 RagdollEndPacket::decode,
                 RagdollEndPacket::handle);
+        CHANNEL.registerMessage(nextId(), PlayerClickRaycastPacket.class,
+                PlayerClickRaycastPacket::write,
+                PlayerClickRaycastPacket::new,
+                PlayerClickRaycastPacket::handle);
     }
 }
