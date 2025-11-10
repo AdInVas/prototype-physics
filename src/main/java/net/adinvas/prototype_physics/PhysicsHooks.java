@@ -1,6 +1,8 @@
 package net.adinvas.prototype_physics;
 
+import net.adinvas.prototype_physics.events.PlayerPartHitEvent;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
@@ -8,6 +10,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.level.ExplosionEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -20,6 +23,12 @@ public class PhysicsHooks {
         if (event.phase == TickEvent.Phase.END && event.level instanceof ServerLevel level) {
             JbulletWorld manager = JbulletWorld.get(level);
             manager.step(1f / 20f); // Minecraft server ticks at 20 TPS
+            JbulletWorld.get(level).reconcilePlayers();
+
+// Ensure every player in this ServerLevel has an entry in this world's manager
+            for (ServerPlayer sp : level.players()) {
+                JbulletWorld.get(level).addPlayer(sp); // computeIfAbsent ensures idempotence
+            }
         }
     }
 
@@ -62,5 +71,22 @@ public class PhysicsHooks {
         }
     }
 
+    @SubscribeEvent
+    public static void onPlayerDeath(LivingDeathEvent event){
+        if (event.getEntity() instanceof ServerPlayer player){
+            JbulletWorld world = JbulletWorld.get(player.serverLevel());
+            PlayerPhysics physics = world.getPlayerPhys(player);
+            if (physics!=null){
+                physics.setMode(PlayerPhysics.Mode.SILENT);
+            }
+        }
+    }
+
+
+    @SubscribeEvent
+    public static void onRagollHit(PlayerPartHitEvent event){
+        if (event.getImpactForce()<0.1)return;
+        event.getPlayer().sendSystemMessage(Component.literal("VEL : "+event.getImpactForce()+" AT: "+event.getLocalPoint()));
+    }
 
 }

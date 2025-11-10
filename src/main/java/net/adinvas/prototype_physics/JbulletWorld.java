@@ -50,16 +50,19 @@ public class JbulletWorld {
 
         dynamicsWorld = new DiscreteDynamicsWorld(dispatcher, broadphase, solver, collisionConfig);
         dynamicsWorld.setGravity(new Vector3f(0f, -9.81f, 0f));
+        dynamicsWorld.getSolverInfo().numIterations = 20;
     }
 
     public void step(float dt) {
         // fixed-step, with substeps
-        dynamicsWorld.stepSimulation(dt, 15, 1f/60f);
+        dynamicsWorld.stepSimulation(dt, 30, 1f/120f);
 
         // read back player positions & dispatch events
         for (PlayerPhysics pp : players.values()) {
             pp.afterStep(); // will push network updates, handle events
         }
+
+        reconcilePlayers();
     }
 
     public DiscreteDynamicsWorld getDynamicsWorld() {
@@ -67,8 +70,8 @@ public class JbulletWorld {
     }
 
     public void addPlayer(ServerPlayer player) {
-        PlayerPhysics pp = new PlayerPhysics(player, this, dynamicsWorld);
-        players.put(player.getUUID(), pp);
+        // Avoid recreating PlayerPhysics if it already exists for this player in this JbulletWorld
+        players.computeIfAbsent(player.getUUID(), uuid -> new PlayerPhysics(player, this, dynamicsWorld));
     }
 
     public void removePlayer(ServerPlayer player) {
@@ -90,6 +93,31 @@ public class JbulletWorld {
             }
         }
         return null;
+    }
+
+    public void reconcilePlayers() {
+        // Iterate over a copy of entries to avoid concurrent-modification
+        var it = players.entrySet().iterator();
+        while (it.hasNext()) {
+            var entry = it.next();
+            PlayerPhysics pp = entry.getValue();
+            ServerPlayer player = pp.getPlayer();
+            // If player's current serverLevel is not the same as this manager's level,
+            // they moved dimension => remove their PlayerPhysics from this world.
+            if (player == null || player.serverLevel() != this.level) {
+                pp.destroy();
+                it.remove();
+            }
+        }
+    }
+
+    public ServerPlayer getServerPlayer(UUID uuid) {
+        // may return null if player is offline / respawned into different world
+        for (ServerPlayer p : level.players()) {
+            if (p.getUUID().equals(uuid)) return p;
+        }
+        // faster alternative: level.getPlayerByUUID(uuid) if available in your MCP/MC version
+        return (ServerPlayer) level.getPlayerByUUID(uuid);
     }
 
 }

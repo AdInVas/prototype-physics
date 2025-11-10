@@ -2,6 +2,7 @@ package net.adinvas.prototype_physics.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import net.adinvas.prototype_physics.PrototypePhysics;
 import net.adinvas.prototype_physics.RagdollPart;
 import net.adinvas.prototype_physics.RagdollTransform;
 import net.minecraft.client.Minecraft;
@@ -54,8 +55,11 @@ public class RagdollPlayerRenderer {
     public static void onRenderPlayer(RenderPlayerEvent.Pre event) {
         AbstractClientPlayer player = (AbstractClientPlayer) event.getEntity();
         RagdollManager.ClientRagdoll rag = RagdollManager.get(player.getId());
+        if (player.isDeadOrDying()){
+            RagdollManager.remove(player.getId());
+            return;
+        }
         if (rag == null || !rag.isActive()) return;
-
         event.setCanceled(true); // We’ll manually render the player model
 
         PlayerRenderer renderer = event.getRenderer();
@@ -83,7 +87,6 @@ public class RagdollPlayerRenderer {
         renderRagdollPart(poseStack, vertexConsumer, player, model.leftArm, larm, torso,larmoff, event.getPackedLight());
         renderRagdollPart(poseStack, vertexConsumer, player, model.rightArm, rarm, torso,rarmoff, event.getPackedLight());
     }
-
 
     public static void renderRagdollPart(
             PoseStack poseStack,

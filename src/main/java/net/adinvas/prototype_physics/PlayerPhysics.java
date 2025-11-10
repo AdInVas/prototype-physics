@@ -2,6 +2,8 @@ package net.adinvas.prototype_physics;
 
 import com.bulletphysics.collision.dispatch.CollisionFlags;
 import com.bulletphysics.collision.dispatch.CollisionObject;
+import com.bulletphysics.collision.dispatch.CollisionWorld;
+import com.bulletphysics.collision.dispatch.PairCachingGhostObject;
 import com.bulletphysics.collision.narrowphase.ManifoldPoint;
 import com.bulletphysics.collision.narrowphase.PersistentManifold;
 import com.bulletphysics.collision.shapes.BoxShape;
@@ -26,6 +28,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -37,19 +40,17 @@ import javax.vecmath.AxisAngle4f;
 import javax.vecmath.Quat4f;
 import javax.vecmath.Vector3d;
 import javax.vecmath.Vector3f;
-import java.util.ArrayList;
-import java.util.EnumMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.function.BiFunction;
 
 public class PlayerPhysics {
     public enum Mode { SILENT, PRECISE }
 
-    private final ServerPlayer player;
+    private final UUID player;
     private final JbulletWorld manager;
     private final DiscreteDynamicsWorld world;
     private Mode mode = Mode.SILENT;
+    private boolean ignoreNext;
 
     private final List<RigidBody> ragdollParts = new ArrayList<>(6);
     private final List<TypedConstraint> ragdollJoints = new ArrayList<>(5);
@@ -59,17 +60,21 @@ public class PlayerPhysics {
     private final int networkRagdollId;
 
     public PlayerPhysics(ServerPlayer player, JbulletWorld manager, DiscreteDynamicsWorld world) {
-        this.player = player;
+        this.player = player.getUUID();
         this.manager = manager;
         this.world = world;
         this.networkRagdollId = player.getId(); // simple choice; use a unique id scheme in production
         createSilentBodies();
         updateLocalWorldCollision(); // build initial 5x5x5
     }
+    private ServerPlayer getPlayerSafe() {
+        return manager.getServerPlayer(player);
+    }
 
     private void createSilentBodies() {
         destroySilentBodies(); // cleanup if any exist first
-
+        ServerPlayer player = getPlayerSafe();
+        if (player==null)return;
         Vector3d pos = new Vector3d(player.getX(), player.getY(), player.getZ());
         float yawRad = (float) Math.toRadians(player.getYHeadRot());
 
@@ -138,11 +143,23 @@ public class PlayerPhysics {
     public void setMode(Mode newMode) {
         if (newMode == this.mode) return;
         if (newMode == Mode.PRECISE) {
+            ServerPlayer player = getPlayerSafe();
+            if (isInsideSolid(player,manager.getWorld()))return;
             enterRagdollMode();
         } else {
             exitRagdollMode();
         }
         this.mode = newMode;
+    }
+
+    public void forceMode(Mode newmode){
+        if (newmode == this.mode) return;
+        if (newmode == Mode.PRECISE) {
+            enterRagdollMode();
+        } else {
+            exitRagdollMode();
+        }
+        this.mode = newmode;
     }
 
     public Mode getMode() {
@@ -151,6 +168,8 @@ public class PlayerPhysics {
 
     private void enterRagdollMode() {
         // remove silent bodies
+        ServerPlayer player = getPlayerSafe();
+        if (player==null)return;
         destroySilentBodies();
         // create ragdoll parts (6 bodies). Example layout: head, torso, pelvis, leftArm, rightArm, legs combined maybe
         // massed bodies
@@ -163,6 +182,43 @@ public class PlayerPhysics {
                 PacketDistributor.ALL.noArg(),
                 new RagdollStartPacket(player.getId(), networkRagdollId, getRagdollTransforms())
         );
+    }
+    private boolean isInsideSolid(ServerPlayer player, DiscreteDynamicsWorld world) {
+        // Define a small bounding shape roughly matching the player torso
+        CollisionShape shape = new BoxShape(new Vector3f(0.4f, 0.9f, 0.4f));
+
+        Transform t = new Transform();
+        t.setIdentity();
+        t.origin.set(
+                (float) player.getX(),
+                (float) player.getY() + 0.9f,
+                (float) player.getZ()
+        );
+
+        // Create a temporary ghost object to test collisions
+        PairCachingGhostObject ghost = new PairCachingGhostObject();
+        ghost.setWorldTransform(t);
+        ghost.setCollisionShape(shape);
+        ghost.setCollisionFlags(CollisionFlags.NO_CONTACT_RESPONSE);
+
+        // Register ghost temporarily in the world
+        world.addCollisionObject(ghost);
+
+        // Check overlaps
+        boolean inside = world.getDispatcher().getNumManifolds() > 0;
+        for (int i = 0; i < world.getDispatcher().getNumManifolds(); i++) {
+            PersistentManifold m = world.getDispatcher().getManifoldByIndexInternal(i);
+            if (m.getBody0() == ghost || m.getBody1() == ghost) {
+                if (m.getNumContacts() > 0) {
+                    inside = true;
+                    break;
+                }
+            }
+        }
+
+        // Remove ghost again
+        world.removeCollisionObject(ghost);
+        return inside;
     }
 
     private void exitRagdollMode() {
@@ -189,13 +245,15 @@ public class PlayerPhysics {
 
         } else if (mode == Mode.PRECISE) {
             // read ragdoll transforms
+            ServerPlayer player = getPlayerSafe();
+            if (player==null)return;
             RagdollTransform[] transforms = getRagdollTransforms();
             ModNetwork.CHANNEL.send(
-                    PacketDistributor.TRACKING_ENTITY.with(() -> player),
+                    PacketDistributor.TRACKING_ENTITY.with(()->player),
                     new RagdollUpdatePacket(networkRagdollId, System.currentTimeMillis(), transforms)
             );
             ModNetwork.CHANNEL.send(
-                    PacketDistributor.PLAYER.with(() -> player),
+                    PacketDistributor.PLAYER.with(()->player),
                     new RagdollUpdatePacket(networkRagdollId, System.currentTimeMillis(), transforms)
             );
 
@@ -209,15 +267,27 @@ public class PlayerPhysics {
             Vector3f pos = torsoTransform.origin;
             player.teleportTo(pos.x, pos.y, pos.z);
             //torsoBody.setWorldTransform(torsoTransform);
+            for (RigidBody r :ragdollParts){
+                Vector3f vel = new Vector3f();
+                r.getLinearVelocity(vel);
+                if (vel.y < -80f) vel.y = -80f;
+                float speed = vel.length();
+                if (speed > 90f) {
+                    vel.scale(90f / speed);
+                }
+                r.setLinearVelocity(vel);
+            }
             applyFluidForces();
         }
         checkCollisionsForParts();
         updateLocalWorldCollision();
+        correctInterpenetrations();
     }
     private void updateSilentFromPlayer() {
         Transform t = new Transform();
         t.setIdentity();
-
+        ServerPlayer player = getPlayerSafe();
+        if (player==null)return;
         // Base player position and velocity
         Vec3 vel = player.getDeltaMovement();
         Vector3d ppos = new Vector3d(player.getX(), player.getY(), player.getZ());
@@ -269,6 +339,8 @@ public class PlayerPhysics {
     }
 
     private void createRagdollBodies() {
+        ServerPlayer player = getPlayerSafe();
+        if (player==null)return;
         Vec3 plM = player.getDeltaMovement(); // current player velocity
         Vector3f motion = new Vector3f((float) plM.x * 20, (float) plM.y * 20, (float) plM.z * 20);
         float x = 0;
@@ -307,6 +379,8 @@ public class PlayerPhysics {
         torsoBody.setRestitution(0.0f);
         torsoBody.setDamping(0.05f, 0.85f);
         torsoBody.setSleepingThresholds(0.1f, 0.1f);
+        torsoBody.setCcdMotionThreshold(0.01f);
+        torsoBody.setCcdSweptSphereRadius(0.4f);
         world.addRigidBody(torsoBody);
         ragdollParts.add(torsoBody);
 
@@ -320,6 +394,9 @@ public class PlayerPhysics {
         headT.setRotation(qq);
         RigidBody headBody = new RigidBody(makeInfo(4, headT, headShape));
         headBody.setLinearVelocity(motion);
+        headBody.setCcdMotionThreshold(0.01f);
+        headBody.setDamping(0.05f, 0.85f);
+        headBody.setCcdSweptSphereRadius(0.25f);
         world.addRigidBody(headBody);
         ragdollParts.add(headBody);
 
@@ -334,6 +411,9 @@ public class PlayerPhysics {
         lLegT.setRotation(qq);
         RigidBody lLegBody = new RigidBody(makeInfo(6, lLegT, lLegShape));
         lLegBody.setLinearVelocity(motion);
+        lLegBody.setCcdMotionThreshold(0.01f);
+        lLegBody.setDamping(0.05f, 0.85f);
+        lLegBody.setCcdSweptSphereRadius(0.35f);
         world.addRigidBody(lLegBody);
         ragdollParts.add(lLegBody);
 
@@ -347,6 +427,9 @@ public class PlayerPhysics {
         rLegT.setRotation(qq);
         RigidBody rLegBody = new RigidBody(makeInfo(6, rLegT, lLegShape));
         rLegBody.setLinearVelocity(motion);
+        rLegBody.setCcdMotionThreshold(0.01f);
+        rLegBody.setDamping(0.05f, 0.85f);
+        rLegBody.setCcdSweptSphereRadius(0.35f);
         world.addRigidBody(rLegBody);
         ragdollParts.add(rLegBody);
 
@@ -362,6 +445,9 @@ public class PlayerPhysics {
         RigidBody lArmBody = new RigidBody(makeInfo(4, lArmT, lArmShape));
         lArmBody.setLinearVelocity(motion);
         lArmBody.applyDamping(0.1f);
+        lArmBody.setCcdMotionThreshold(0.01f);
+        lArmBody.setDamping(0.05f, 0.85f);
+        lArmBody.setCcdSweptSphereRadius(0.3f);
         world.addRigidBody(lArmBody);
         ragdollParts.add(lArmBody);
 
@@ -376,6 +462,9 @@ public class PlayerPhysics {
         RigidBody rArmBody = new RigidBody(makeInfo(4, rArmT, lArmShape));
         rArmBody.setLinearVelocity(motion);
         rArmBody.applyDamping(0.1f);
+        rArmBody.setCcdMotionThreshold(0.01f);
+        rArmBody.setDamping(0.05f, 0.85f);
+        rArmBody.setCcdSweptSphereRadius(0.3f);
         world.addRigidBody(rArmBody);
         ragdollParts.add(rArmBody);
 
@@ -564,6 +653,8 @@ public class PlayerPhysics {
 
 
     private void checkCollisionsForParts() {
+        ServerPlayer player =getPlayerSafe();
+        if (player==null)return;
         // Inspect all contact manifolds from dispatcher to find collisions involving our ragdoll parts.
         // For each manifold, examine the bodies and dispatch onPartHit if one is our ragdoll part.
         int numManifolds = manager.getDispatcher().getNumManifolds();
@@ -583,11 +674,17 @@ public class PlayerPhysics {
                     if (mode == Mode.PRECISE){
                         if (ragdollParts.contains(a)) { hitPart = (RigidBody) a; other = b; }
                         else if (ragdollParts.contains(b)) { hitPart = (RigidBody) b; other = a; }
+                        if (ignoreNext){
+                            ignoreNext=false;
+                            return;
+                        }
                         if (hitPart != null) {
                             Vector3f contactPoint = new Vector3f();
                             pt.getPositionWorldOnB(contactPoint);
+                            Vector3f contactLocal = new Vector3f();
+                            pt.getPositionWorldOnA(contactLocal);
                             float impactSpeed = computeImpactSpeed(a,b,pt); // rough proxy; you can compute relative velocity
-                            dispatchOnPartHit(player, hitPart, other, contactPoint, impactSpeed);
+                            dispatchOnPartHit(player, hitPart, other, contactPoint,contactLocal, impactSpeed);
                         }
                     }else{
                         if (silentParts.contains(a)) { hitPart = (RigidBody) a; other = b; }
@@ -595,8 +692,10 @@ public class PlayerPhysics {
                         if (hitPart != null) {
                             Vector3f contactPoint = new Vector3f();
                             pt.getPositionWorldOnB(contactPoint);
+                            Vector3f contactLocal = new Vector3f();
+                            pt.getPositionWorldOnA(contactLocal);
                             float impactSpeed = computeImpactSpeed(a,b,pt); // rough proxy; you can compute relative velocity
-                            dispatchOnPartHit(player, hitPart, other, contactPoint, impactSpeed);
+                            dispatchOnPartHit(player, hitPart, other, contactPoint,contactLocal, impactSpeed);
                         }
                     }
                 }
@@ -604,11 +703,11 @@ public class PlayerPhysics {
         }
     }
 
-    private void dispatchOnPartHit(ServerPlayer player, RigidBody part, CollisionObject other, Vector3f point, float impact) {
+    private void dispatchOnPartHit(ServerPlayer player, RigidBody part, CollisionObject other, Vector3f point, Vector3f local, float impact) {
         RagdollPart partName = identifyPart(part); // map body -> "head"/"torso" etc
         // Fire your mod event system or call handlers
         if (impact<0.05)return;
-        ModEvents.onPlayerPartHit(player,mode, partName, other, point, impact);
+        ModEvents.onPlayerPartHit(player,mode, partName, other, point,local, impact);
     }
 
     public void destroy() {
@@ -632,6 +731,8 @@ public class PlayerPhysics {
     private BlockPos lastCollisionCenter = BlockPos.ZERO;
 
     public void updateLocalWorldCollision() {
+        ServerPlayer player = getPlayerSafe();
+        if (player==null)return;
         BlockPos center = player.getOnPos();
         if (center.distManhattan(lastCollisionCenter) < 2) return; // skip small moves
         lastCollisionCenter = center;
@@ -678,6 +779,8 @@ public class PlayerPhysics {
     }
 
     private boolean isCompletelySurrounded(BlockPos pos) {
+        ServerPlayer player = getPlayerSafe();
+        if (player==null)return true;
         for (Direction dir : Direction.values()) {
             BlockPos neighbor = pos.relative(dir);
             BlockState neighborState = player.level().getBlockState(neighbor);
@@ -700,6 +803,10 @@ public class PlayerPhysics {
 
         Vector3f velA = new Vector3f(0f, 0f, 0f);
         Vector3f velB = new Vector3f(0f, 0f, 0f);
+        if (pt.getDistance() < -0.1f) {
+            // Contact point is deeply inside another collider → skip
+            return 0f;
+        }
 
         if (aObj instanceof RigidBody) {
             RigidBody a = (RigidBody) aObj;
@@ -738,7 +845,7 @@ public class PlayerPhysics {
         // relative velocity of A w.r.t B at the contact point
         Vector3f rel = new Vector3f();
         rel.sub(velA, velB);
-
+        //if (rel.length()>15) return rel.length()/2;
         return rel.length(); // impact speed (magnitude)
     }
 
@@ -809,6 +916,8 @@ public class PlayerPhysics {
     }
 
     private void applyFluidForces() {
+        ServerPlayer player = getPlayerSafe();
+        if (player==null)return;
         if (player.isInWater()) {
             Vec3 flow = player.level().getFluidState(player.blockPosition()).getFlow(player.level(), player.blockPosition());
             Vector3f waterFlow = new Vector3f((float) flow.x, (float) flow.y, (float) flow.z);
@@ -835,7 +944,7 @@ public class PlayerPhysics {
     }
 
     public ServerPlayer getPlayer() {
-        return player;
+        return getPlayerSafe();
     }
 
 
@@ -927,4 +1036,69 @@ public class PlayerPhysics {
         world.addConstraint(joint, true);
         return joint;
     }
+
+    public void setWeight(float value,RagdollPart part){
+        RigidBody b = ragdollParts.get(part.index);
+        CollisionShape shape = b.getCollisionShape();
+        Vector3f inertia = new Vector3f();
+        value = Math.max(0,value);
+        if (value > 0f) {
+            // Properly compute inertia based on shape and mass
+            shape.calculateLocalInertia(value, inertia);
+        } else {
+            inertia.set(0, 0, 0);
+        }
+        b.setMassProps(value,inertia);
+    }
+
+    public Quaternionf getRotation(RagdollPart part){
+        RigidBody b = ragdollParts.get(part.index);
+        Transform t = new Transform();
+        b.getWorldTransform(t);
+        Quat4f q = new Quat4f();
+        t.getRotation(q);
+        return new Quaternionf(q.x,q.y,q.z,q.w);
+    }
+
+    public Vec3 getVelocity(RagdollPart part){
+        RigidBody b = ragdollParts.get(part.index);
+        Vector3f vector3f = new Vector3f();
+        b.getAngularVelocity(vector3f);
+        return new Vec3(vector3f.x,vector3f.y,vector3f.z);
+    }
+
+    private void correctInterpenetrations() {
+        for (PersistentManifold manifold : manager.getDispatcher().getInternalManifoldPointer()) {
+            int numContacts = manifold.getNumContacts();
+            for (int i = 0; i < numContacts; i++) {
+                ManifoldPoint point = manifold.getContactPoint(i);
+                if (point.getDistance() < -0.1f) { // deep penetration
+                    RigidBody a = (RigidBody) manifold.getBody0();
+                    RigidBody b = (RigidBody) manifold.getBody1();
+                    PrototypePhysics.LOGGER.info("INTERSECTED");
+                    ignoreNext = true;
+
+                    Vector3f normal = point.normalWorldOnB;
+                    normal.scale(4.5f * -point.getDistance()); // half the depth
+                    if (a.getInvMass() > 0) a.translate(normal);
+                    normal.scale(-1);
+                    if (b.getInvMass() > 0) b.translate(normal);
+                }
+            }
+        }
+    }
+
+    private Vec3 findNearestAirPosition(ServerPlayer player, Vector3d start) {
+        Level level = player.level();
+        BlockPos.MutableBlockPos test = new BlockPos.MutableBlockPos(start.x, start.y, start.z);
+
+        for (int i = 0; i < 10; i++) {
+            if (level.getBlockState(test).isAir()) {
+                return new Vec3(test.getX() + 0.5, test.getY() + 0.5, test.getZ() + 0.5);
+            }
+            test.move(Direction.UP);
+        }
+        return new Vec3(start.x, start.y + 1.0, start.z); // fallback
+    }
+
 }

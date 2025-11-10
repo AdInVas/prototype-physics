@@ -9,8 +9,8 @@ import javax.vecmath.Vector3f;
 
 public class ModEvents {
 
-    public static void onPlayerPartHit(ServerPlayer player, PlayerPhysics.Mode mode, RagdollPart partName, Object hitTarget, Vector3f point, float impact) {
-        PlayerPartHitEvent event = new PlayerPartHitEvent(player,mode, partName, hitTarget, point, impact);
+    public static void onPlayerPartHit(ServerPlayer player, PlayerPhysics.Mode mode, RagdollPart partName, Object hitTarget, Vector3f point, Vector3f local, float impact) {
+        PlayerPartHitEvent event = new PlayerPartHitEvent(player,mode, partName, hitTarget, point,local, impact);
         MinecraftForge.EVENT_BUS.post(event);
     }
 

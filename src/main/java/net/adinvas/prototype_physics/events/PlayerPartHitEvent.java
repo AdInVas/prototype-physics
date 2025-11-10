@@ -12,15 +12,17 @@ public class PlayerPartHitEvent extends Event {
     private final RagdollPart partName;        // e.g. "head", "torso"
     private final Object hitTarget;       // BlockPos or Entity
     private final Vector3f contactPoint;
+    private final Vector3f localPoint;
     private final float impactForce;
     private final PlayerPhysics.Mode mode;
 
 
-    public PlayerPartHitEvent(ServerPlayer player, PlayerPhysics.Mode mode, RagdollPart partName, Object hitTarget, Vector3f contactPoint, float impactForce) {
+    public PlayerPartHitEvent(ServerPlayer player, PlayerPhysics.Mode mode, RagdollPart partName, Object hitTarget, Vector3f contactPoint, Vector3f localPoint, float impactForce) {
         this.player = player;
         this.partName = partName;
         this.hitTarget = hitTarget;
         this.contactPoint = contactPoint;
+        this.localPoint = localPoint;
         this.impactForce = impactForce;
         this.mode = mode;
     }
@@ -36,5 +38,9 @@ public class PlayerPartHitEvent extends Event {
 
     public PlayerPhysics.Mode getMode() {
         return mode;
+    }
+
+    public Vector3f getLocalPoint() {
+        return localPoint;
     }
 }
